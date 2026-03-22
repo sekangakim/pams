@@ -1,0 +1,44 @@
+Package: pams
+Type: Package
+Title: Profile Analysis via Multidimensional Scaling
+Version: 0.1.0
+Date: 2026-03-22
+Authors@R: c(
+    person("Se-Kang", "Kim",
+           email = "Se-Kang.Kim@bcm.edu",
+           role  = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-2460-3415")),
+    person("Donghoh", "Kim",
+           email = "donghoh.kim@gmail.com",
+           role  = "aut",
+           comment = c(ORCID = "0000-0002-3946-0777")))
+Description: Implements Profile Analysis via Multidimensional Scaling (PAMS)
+    for the identification of population-level core response profiles from
+    cross-sectional and longitudinal person-score data. Each person profile
+    is decomposed into a level component (the person mean) and a pattern
+    component (ipsatized subscores). PAMS uses nonmetric multidimensional
+    scaling via the SMACOF algorithm (de Leeuw & Mair, 2009) to identify a
+    small number of core profiles that represent the central response patterns
+    in a sample of any size. Bootstrap standard errors and bias-corrected and
+    accelerated (BCa) confidence intervals for individual core profile
+    coordinates are estimated, enabling significance testing of coordinates
+    that is not available in other profile analysis methods such as cluster
+    profile analysis or latent profile analysis. Person-level weights,
+    R-squared values, and correlations with core profiles are also estimated,
+    allowing individual profiles to be interpreted in terms of the core
+    profile structure. PAMS can be applied to both cross-sectional data and
+    longitudinal data, where core trajectory profiles describe how response
+    patterns change over time.
+License: MIT + file LICENSE
+URL: https://github.com/sekangakim/pams
+BugReports: https://github.com/sekangakim/pams/issues
+Depends:
+    R (>= 4.0.0)
+Imports:
+    smacof (>= 2.1.0)
+Suggests:
+    lmtest (>= 0.9.40),
+    testthat (>= 3.0.0)
+Encoding: UTF-8
+RoxygenNote: 7.3.3
+Config/testthat/edition: 3
