@@ -1,0 +1,157 @@
+---
+title: "Profile Analysis via Multidimensional Scaling with pams"
+author: "Se-Kang Kim and Donghoh Kim"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Profile Analysis via Multidimensional Scaling with pams}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+## What pams adds
+
+Profile Analysis via Multidimensional Scaling (PAMS) separates each person's
+scores into an overall level and an ipsatized pattern. Without `pams`, an R
+user would need to program the standardization, level--pattern decomposition,
+inter-variable dissimilarities, MDS fitting, person-level bootstrap, sign
+alignment, BCa intervals, and person-weight regressions as separate steps.
+`BootSmacof()` integrates those operations and returns a fitted object with
+`summary()` and `plot()` methods.
+
+Let $z_i$ be person $i$'s $J$-variable score vector. The level and pattern
+are
+
+$$
+\ell_i = J^{-1}\sum_j z_{ij}, \qquad p_i = z_i - \ell_i\mathbf{1}.
+$$
+
+If the retained MDS coordinates form the $J \times K$ matrix $C$, PAMS
+represents the pattern as
+
+$$
+p_i = Cw_i + e_i.
+$$
+
+The values `w1`, ..., `wK` are the unstandardized no-intercept ordinary
+least-squares coefficients in $w_i$. The `corDim` values are partial
+correlations between the person pattern and each coordinate vector after
+controlling for the remaining vectors.
+
+## Workflow
+
+The recommended workflow is:
+
+1. prepare the persons-by-variables matrix and standardize when measurement
+   scales differ;
+2. inspect preliminary MDS solutions and dimensionality evidence;
+3. choose interpretable axis directions;
+4. run `BootSmacof()` with at least 1,000 bootstrap samples for an analysis;
+5. use `summary()`, `plot()`, and the person-level output; and
+6. treat downstream group comparisons as optional analyses of returned
+   quantities rather than part of the PAMS estimator.
+
+The small bootstrap count below keeps vignette-building fast. It is not a
+recommended value for substantive work.
+
+## Reproducible example
+
+The built-in `USArrests` data are used only to demonstrate the software
+workflow. States are treated as persons and the four variables as related
+measurements.
+
+```{r data}
+library(pams)
+
+example_data <- as.data.frame(USArrests[1:12, ])
+example_names <- colnames(example_data)
+```
+
+Because the variables use different units, the preliminary dissimilarities
+are computed after column standardization. Stress can be inspected across
+candidate dimensions; with four variables, two dimensions are used here.
+
+```{r preliminary}
+standardized <- scale(example_data)
+proximity <- dist(t(standardized))
+preliminary <- smacof::smacofSym(proximity, ndim = 2, type = "ordinal")
+preliminary$stress
+preliminary$conf
+```
+
+Axis signs are arbitrary. Inspect the preliminary coordinates and select `1`
+or `-1` for each axis so that prespecified anchor variables appear on the
+desired side. The example retains both signs.
+
+```{r fit}
+set.seed(2026)
+fit <- suppressWarnings(BootSmacof(
+  testdata = example_data,
+  participant = 1:3,
+  mds = "smacof",
+  type = "ordinal",
+  distance = "euclid",
+  scale = TRUE,
+  nprofile = 2,
+  direction = c(1, 1),
+  cl = 0.95,
+  nBoot = 10,
+  testname = example_names
+))
+```
+
+## Summaries and plots
+
+```{r summary}
+summary(fit)
+round(fit$MDSsummary[[1]], 3)
+round(fit$Weight[1:5, ], 3)
+```
+
+```{r plot, fig.width=7, fig.height=4}
+plot(fit, profiles = 1:2, interval = "BCa")
+```
+
+The original-sample MDS fit stored in `fit$MDS` is the result of applying the
+selected directions to the same SMACOF analysis. The stress therefore agrees
+with the preliminary fit. Coordinate signs should be resolved before direct
+comparison.
+
+```{r comparison}
+c(preliminary = preliminary$stress, BootSmacof = fit$MDS$stress)
+
+signs <- sign(diag(cor(preliminary$conf, fit$MDS$conf)))
+signs[signs == 0] <- 1
+aligned_preliminary <- sweep(preliminary$conf, 2, signs, `*`)
+max(abs(aligned_preliminary - fit$MDS$conf))
+```
+
+## Tidyverse-style handling
+
+The fitted object remains a named list for backward compatibility, so it can
+be passed through a base-R pipe and its tabular components can be converted
+directly to tibbles. The `tibble` package is optional rather than a required
+dependency.
+
+```{r tidyverse}
+fit |> summary()
+
+if (requireNamespace("tibble", quietly = TRUE)) {
+  weights_tbl <- tibble::as_tibble(fit$Weight, rownames = "participant")
+  weights_tbl
+}
+```
+
+## Sign and alignment limitation
+
+For every bootstrap and jackknife sample, `BootSmacof()` aligns each dimension
+to its original-sample counterpart using the sign of their correlation. It
+does not perform general rotational alignment or dimension-permutation
+matching. Coordinate-wise intervals should therefore be interpreted
+cautiously when dimensions are weak or nearly interchangeable. Reversing an
+axis changes only its reported sign; it does not change interpoint distances,
+stress, overall fit, or whether an interval excludes zero.

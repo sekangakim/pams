@@ -9,7 +9,7 @@
 #' inter-variable distance matrix, bootstraps the solution to generate
 #' empirical sampling distributions of core profile coordinates, and computes
 #' bias-corrected and accelerated (BCa) confidence intervals for each
-#' coordinate. Person-level weights, R-squared values, and correlations with
+#' coordinate. Person-level weights, R-squared values, and partial correlations with
 #' core profiles are estimated for all participants, with optional bootstrap
 #' confidence intervals for a selected subset.
 #'
@@ -49,24 +49,27 @@
 #'   element either \code{1} or \code{-1}. Multiplying a dimension by
 #'   \code{-1} flips its sign to aid substantive interpretation (e.g., so
 #'   that the first core profile aligns with the subscale mean profile).
-#'   Default is \code{rep(1, nprofile)} (no flipping).
+#'   Inspect the preliminary \code{smacofSym()} coordinate plots and choose
+#'   signs so that prespecified anchor variables appear on the desired side of
+#'   each axis. Reversing a sign does not alter distances, stress, fit, or
+#'   whether an interval excludes zero. Default is \code{rep(1, nprofile)}.
 #' @param cl Numeric confidence level for BCa intervals. Default is
 #'   \code{0.95}. Common alternatives are \code{0.99} and \code{0.90}.
 #' @param nBoot A positive integer specifying the number of bootstrap
 #'   samples. A minimum of \code{1000} is recommended for stable confidence
-#'   interval estimation (Efron & Tibshirani, 1993); \code{2000} is the
-#'   default.
+#'   interval estimation (Efron & Tibshirani, 1993); values below 1000 issue a
+#'   warning and values below 10 are rejected. \code{2000} is the default.
 #' @param testname An optional character vector of length equal to the number
 #'   of columns in \code{testdata}, giving subscale names used as row labels
 #'   in summary output and plots. If \code{NULL}, labels \code{"T1"},
 #'   \code{"T2"}, \ldots are generated automatically.
 #' @param file An optional character string giving a file path stem. If
-#'   supplied, three CSV files are written: \code{<file>MDS.csv} (stress
+#'   supplied, two CSV files are always written: \code{<file>MDS.csv} (stress
 #'   summary and core profile coordinates with BCa CIs),
 #'   \code{<file>Weight.csv} (person weights, levels, R-squared values, and
-#'   core-profile correlations), and \code{<file>WeightB.csv} (bootstrap
-#'   summaries for selected participants). If \code{NULL} (the default), no
-#'   files are written.
+#'   core-profile partial correlations). When \code{participant} is not \code{NULL},
+#'   \code{<file>WeightB.csv} and \code{<file>PcorrB.csv} are also written.
+#'   If \code{NULL} (the default), no files are written.
 #'
 #' @return A named list with the following components:
 #'   \describe{
@@ -82,7 +85,9 @@
 #'       \code{Mean} (bootstrap mean), \code{SE} (bootstrap standard error),
 #'       \code{Lower} and \code{Upper} (percentile CI bounds),
 #'       \code{BCaLower} and \code{BCaUpper} (BCa CI bounds). Coordinates
-#'       whose BCa CI does not include zero are statistically significant.}
+#'       whose pointwise BCa CI does not include zero are statistically
+#'       significant at the stated coordinate-wise level; these intervals are
+#'       not adjusted for multiplicity.}
 #'     \item{\code{MDSprofile}}{A list of \code{nprofile} matrices, each of
 #'       dimension \code{nBoot} \eqn{\times} \eqn{J}, containing the full
 #'       bootstrap distribution of core profile coordinates.}
@@ -100,9 +105,14 @@
 #'       core profiles are not collinear.}
 #'     \item{\code{Weight}}{A matrix of dimension \eqn{I \times (2K + 2)}
 #'       containing, for every person: raw weights (\code{w1}, \ldots,
-#'       \code{wK}), level estimate, R-squared value, and correlations with
-#'       each core profile (\code{corDim1}, \ldots, \code{corDimK}).
-#'       Row names are \code{"#1"}, \code{"#2"}, \ldots}
+#'       \code{wK}), level estimate, R-squared value, and partial correlations
+#'       with each core profile (\code{corDim1}, \ldots, \code{corDimK}).
+#'       The raw weights are unstandardized no-intercept OLS coefficients from
+#'       regressing the person's ipsatized pattern on the retained coordinate
+#'       vectors. Each \code{corDim} value is the correlation between the
+#'       residualized person pattern and residualized focal core profile after
+#'       controlling for the other profiles. Row names are \code{"#1"},
+#'       \code{"#2"}, \ldots}
 #'     \item{\code{WeightmeanR2}}{The mean R-squared value across all
 #'       \eqn{I} persons, summarising how well the \code{nprofile} core
 #'       profiles account for pattern variance in the sample.}
@@ -118,6 +128,19 @@
 #'     \item{\code{scale}}{Logical; whether columns were standardised.}
 #'     \item{\code{testname}}{Character vector of subscale names used.}
 #'   }
+#'   The returned list has class \code{"pams_fit"}, while retaining direct
+#'   access to every component listed above.
+#'
+#' @section Sign indeterminacy and alignment:
+#' MDS coordinate signs are arbitrary. For each bootstrap and jackknife
+#' sample, \code{BootSmacof()} aligns each dimension to its original-sample
+#' counterpart by its correlation sign and then reports the orientation
+#' selected through \code{direction}. This is sign alignment only: the method
+#' does not perform general rotational alignment or dimension-permutation
+#' matching. Coordinate-wise inference should therefore be interpreted
+#' cautiously when dimensions are weak or nearly interchangeable. A sign
+#' reversal changes only the reported orientation; it does not change
+#' interpoint distances, stress, model fit, or interval exclusion of zero.
 #'
 #' @references
 #' Davison, M. L. (1996). \emph{Multidimensional scaling interest and
@@ -146,62 +169,32 @@
 #'   algorithm.
 #'
 #' @examples
-#' \dontrun{
-#' # Cross-sectional example using bundled WJ-IV cognitive ability data.
-#' library(pams)
-#' library(smacof)
+#' # Small toy example (runs automatically)
+#' set.seed(42)
+#' toy_data <- as.data.frame(matrix(rnorm(8 * 4, mean = 10, sd = 2),
+#'                                  nrow = 8, ncol = 4))
+#' colnames(toy_data) <- paste0("S", 1:4)
 #'
-#' cross_data <- read.csv(
-#'   system.file("extdata", "Cross-sectional.csv", package = "pams"),
-#'   header = FALSE
-#' )
-#' colnames(cross_data) <- c(
-#'   "OV1","NS2","VA3","LP4","PP5","SR6","VS7","GI8",
-#'   "CF9","NR10","NP11","NW12","VA13","PR14","AS15",
-#'   "ON16","PC17","MW18"
-#' )
-#'
-#' # Inspect stress across dimensionalities to choose nprofile
-#' smacofSym(dist(t(cross_data)), ndim = 2, type = "ordinal")$stress
-#' smacofSym(dist(t(cross_data)), ndim = 3, type = "ordinal")$stress
-#' smacofSym(dist(t(cross_data)), ndim = 4, type = "ordinal")$stress
-#'
-#' # Run PAMS with 3 core profiles and 2,000 bootstrap samples
-#' set.seed(1)
-#' result <- BootSmacof(
-#'   testdata    = cross_data,
-#'   participant = 1:10,
+#' result <- suppressWarnings(BootSmacof(
+#'   testdata    = toy_data,
+#'   participant = NULL,
 #'   mds         = "smacof",
 #'   type        = "ordinal",
 #'   distance    = "euclid",
-#'   nprofile    = 3,
-#'   direction   = c(-1, 1, 1),
+#'   nprofile    = 2,
+#'   direction   = c(1, 1),
 #'   cl          = 0.95,
-#'   nBoot       = 2000,
-#'   testname    = colnames(cross_data)
-#' )
-#'
-#' result$MDS$stress       # should be <= 0.05
-#' result$WeightmeanR2     # mean R^2 across all persons
-#'
-#' # Core profile coordinates with BCa CIs
+#'   nBoot       = 10,
+#'   testname    = colnames(toy_data)
+#' ))
+#' result$MDS$stress
+#' round(result$WeightmeanR2, 2)
 #' round(result$MDSsummary[[1]], 3)
-#' round(result$MDSsummary[[2]], 3)
-#' round(result$MDSsummary[[3]], 3)
-#'
-#' # Weights and correlations for first 10 persons
-#' round(result$Weight[1:10, ], 2)
-#' }
-#'
-#' @importFrom smacof smacofSym
-#' @importFrom stats cmdscale dist cor lm quantile qnorm pnorm sd
-#'   update coefficients as.formula
-#' @importFrom utils write.table
 #'
 #' @export
 BootSmacof <- function(testdata, participant = NULL,
                        mds      = c("smacof", "classical"),
-                       type     = c("ratio", "interval", "ordinal", "mspline"),
+                       type     = c("ordinal", "interval", "ratio", "mspline"),
                        distance = c("euclid", "sqeuclid"),
                        scale    = FALSE,
                        nprofile  = 3,
@@ -211,401 +204,391 @@ BootSmacof <- function(testdata, participant = NULL,
                        testname  = NULL,
                        file      = NULL)
 {
-    ntest    <- ncol(testdata)
+    call <- match.call()
+    mds <- match.arg(mds)
+    type <- match.arg(type)
+    distance <- match.arg(distance)
+
+    if (!is.matrix(testdata) && !is.data.frame(testdata)) {
+        stop("`testdata` must be a numeric matrix or data frame.", call. = FALSE)
+    }
+    if (is.data.frame(testdata) &&
+        !all(vapply(testdata, is.numeric, logical(1L)))) {
+        stop("Every column of `testdata` must be numeric.", call. = FALSE)
+    }
+    testdata <- as.matrix(testdata)
+    if (!is.numeric(testdata)) {
+        stop("`testdata` must contain only numeric values.", call. = FALSE)
+    }
+    storage.mode(testdata) <- "double"
+    if (length(dim(testdata)) != 2L || nrow(testdata) < 3L || ncol(testdata) < 2L) {
+        stop("`testdata` must contain at least three persons and two variables.",
+             call. = FALSE)
+    }
+    if (anyNA(testdata) || any(!is.finite(testdata))) {
+        stop("`testdata` must not contain missing or infinite values.", call. = FALSE)
+    }
+
     nsubject <- nrow(testdata)
-    lalpha   <- (1 - cl) / 2
-    ualpha   <- 1 - lalpha
+    ntest <- ncol(testdata)
+    nprofile <- .pams_integer(nprofile, "nprofile")
+    nBoot <- .pams_integer(nBoot, "nBoot", minimum = 10L)
 
-    if (is.null(testname))
-        testname <- paste0("T", 1:ntest)
-    if (ntest < nprofile)
-        stop("The number of profiles must be less than the number of test.")
-    if (length(direction) != nprofile)
-        stop("The number of profile direction must be the same to the number of profile.")
-    if (!(any(distance == c("euclid", "sqeuclid"))))
-        stop("Distance for smacof must be one of euclid, sqeuclid.")
-
-    if (scale) testdata <- scale(testdata)
-
-    if (distance == "euclid")
-        distance0 <- dist(t(testdata))
-    else if (distance == "sqeuclid")
-        distance0 <- dist(t(testdata))^2
-
-    # ------------------------------------------------------------------
-    # Fit MDS to original sample
-    # ------------------------------------------------------------------
-
-    if (mds == "smacof") {
-        MDS <- smacofSym(distance0, ndim = nprofile, type = type)
-        for (i in 1:nprofile)
-            MDS$conf[, i] <- MDS$conf[, i] * direction[i]
-        profileOri <- MDS$conf
-        stressOri  <- MDS$stress
+    if (nprofile >= ntest) {
+        stop("`nprofile` must be smaller than the number of variables in `testdata`.",
+             call. = FALSE)
     }
-
-    if (mds == "classical") {
-        MDS        <- NULL
-        MDS$conf   <- cmdscale(distance0, k = nprofile)
-        MDS$stress <- stressOri <- NULL
-        colnames(MDS$conf) <- paste0("D", 1:nprofile)
-        for (i in 1:nprofile)
-            MDS$conf[, i] <- MDS$conf[, i] * direction[i]
-        profileOri <- MDS$conf
+    if (nBoot < 1000L) {
+        warning("Fewer than 1,000 bootstrap samples may yield unstable confidence intervals.",
+                call. = FALSE)
     }
+    if (length(scale) != 1L || is.na(scale) || !is.logical(scale)) {
+        stop("`scale` must be either TRUE or FALSE.", call. = FALSE)
+    }
+    if (length(cl) != 1L || !is.numeric(cl) || !is.finite(cl) || cl <= 0 || cl >= 1) {
+        stop("`cl` must be a single finite number strictly between 0 and 1.",
+             call. = FALSE)
+    }
+    if (!is.numeric(direction) || length(direction) != nprofile ||
+        anyNA(direction) || any(!direction %in% c(-1, 1))) {
+        stop("`direction` must contain exactly one value (1 or -1) per profile.",
+             call. = FALSE)
+    }
+    direction <- as.integer(direction)
 
-    # ------------------------------------------------------------------
-    # Bootstrap: empirical distribution of profiles
-    # ------------------------------------------------------------------
-
-    profileBoot <- vector("list", nprofile)
-    stressBoot  <- NULL
-
-    for (i in 1:nBoot) {
-        testdataBoot <- testdata[sample(1:nsubject, replace = TRUE), ]
-
-        if (distance == "euclid")
-            distanceB <- dist(t(testdataBoot))
-        else if (distance == "sqeuclid")
-            distanceB <- dist(t(testdataBoot))^2
-
-        if (mds == "smacof") {
-            tmp0       <- smacofSym(distanceB, ndim = nprofile, type = type)
-            tmp1       <- tmp0$conf
-            stressBoot <- c(stressBoot, tmp0$stress)
-        } else if (mds == "classical") {
-            tmp1 <- cmdscale(distanceB, k = nprofile)
+    if (is.null(participant) || length(participant) == 0L) {
+        participant <- NULL
+    } else {
+        if (!is.numeric(participant) || anyNA(participant) ||
+            any(!is.finite(participant)) || any(participant != floor(participant))) {
+            stop("`participant` must be NULL or an integer vector of row indices.",
+                 call. = FALSE)
         }
-
-        # Procrustes sign-alignment to original profile
-        tmp1 <- tmp1 %*% diag(sign(diag(cor(tmp1, profileOri))))
-
-        for (j in 1:nprofile)
-            profileBoot[[j]] <- rbind(profileBoot[[j]], tmp1[, j])
-    }
-
-    # ------------------------------------------------------------------
-    # BCa acceleration constants via jackknife
-    # (Fix 1: inner loop variable renamed from 'i' to 'k' to avoid
-    #  shadowing the outer subject-index loop variable.)
-    #
-    # BCa implementation based on "bootBCa" R package Version 1.0.
-    # Author: S original, from StatLib, by Rob Tibshirani. R port by
-    # Friedrich Leisch. Enhancements by David Flater.
-    # License: BSD_3_clause + file LICENSE
-    # ------------------------------------------------------------------
-
-    profileu <- uu <- vector("list", nprofile)
-    stressu  <- suu <- NULL
-
-    for (i in 1:nsubject) {
-
-        if (distance == "euclid")
-            distance0 <- dist(t(testdata[-i, ]))
-        else if (distance == "sqeuclid")
-            distance0 <- dist(t(testdata[-i, ]))^2
-
-        if (mds == "smacof") {
-            tmp <- smacofSym(distance0, ndim = nprofile, type = type)
-            for (k in 1:nprofile)
-                tmp$conf[, k] <- tmp$conf[, k] * direction[k]
-            stressu <- c(stressu, tmp$stress)
+        participant <- as.integer(participant)
+        if (any(participant < 1L | participant > nsubject)) {
+            stop("Every `participant` index must identify a row of `testdata`.",
+                 call. = FALSE)
         }
-
-        if (mds == "classical") {
-            tmp      <- NULL
-            tmp$conf <- cmdscale(distance0, k = nprofile)
-            for (k in 1:nprofile)
-                tmp$conf[, k] <- tmp$conf[, k] * direction[k]
+        if (anyDuplicated(participant)) {
+            stop("`participant` indices must be unique.", call. = FALSE)
         }
-
-        for (j in 1:nprofile)
-            profileu[[j]] <- rbind(profileu[[j]], tmp$conf[, j])
     }
 
-    acc <- NULL
-    for (j in 1:nprofile) {
-        uu[[j]] <- -sweep(profileu[[j]], 2, apply(profileu[[j]], 2, mean))
-        acc     <- cbind(acc,
-                         apply(uu[[j]], 2,
-                               function(x) sum(x*x*x) / (6 * (sum(x*x))^1.5)))
-    }
-
-    # ------------------------------------------------------------------
-    # Compute BCa confidence intervals for profile coordinates
-    # ------------------------------------------------------------------
-
-    zalpha <- qnorm(c(lalpha, ualpha))
-    BCACI  <- vector("list", nprofile)
-
-    for (i in 1:nprofile) {
-        tmp <- NULL
-        for (j in 1:ntest) {
-            z0   <- qnorm(sum(profileBoot[[i]][, j] < profileOri[, i][j]) / nBoot)
-            tt   <- pnorm(z0 + (z0 + zalpha) / (1 - acc[j, i] * (z0 + zalpha)))
-            tmp1 <- quantile(profileBoot[[i]][, j], probs = tt)
-            tmp  <- rbind(tmp, tmp1)
+    if (is.null(testname)) {
+        supplied_names <- colnames(testdata)
+        testname <- if (!is.null(supplied_names) &&
+                       all(!is.na(supplied_names)) &&
+                       all(nzchar(supplied_names))) {
+            supplied_names
+        } else {
+            paste0("T", seq_len(ntest))
         }
-        BCACI[[i]] <- tmp
+    }
+    if (!is.character(testname) || length(testname) != ntest ||
+        anyNA(testname) || any(!nzchar(testname)) || anyDuplicated(testname)) {
+        stop("`testname` must contain one unique, non-empty label per variable.",
+             call. = FALSE)
+    }
+    if (!is.null(file) &&
+        (!is.character(file) || length(file) != 1L || is.na(file) || !nzchar(file))) {
+        stop("`file` must be NULL or a single non-empty character string.",
+             call. = FALSE)
     }
 
-    # ------------------------------------------------------------------
-    # Summary statistics for profile coordinates
-    # (Fix 2: column names standardised to 'BCaLower' / 'BCaUpper'.)
-    # ------------------------------------------------------------------
+    variable_sd <- apply(testdata, 2L, stats::sd)
+    if (any(variable_sd == 0)) {
+        stop("Every variable in `testdata` must have non-zero variance.", call. = FALSE)
+    }
+    if (any(apply(testdata, 1L, stats::sd) == 0)) {
+        warning("At least one person has no within-profile variation; its R-squared and correlations are undefined.",
+                call. = FALSE)
+    }
+    if (scale) testdata <- base::scale(testdata)
+
+    lalpha <- (1 - cl) / 2
+    ualpha <- 1 - lalpha
+    distance0 <- .pams_distance(testdata, distance)
+
+    if (identical(mds, "smacof")) {
+        MDS <- smacof::smacofSym(distance0, ndim = nprofile, type = type)
+        MDS$conf <- sweep(MDS$conf, 2L, direction, `*`)
+        stressOri <- MDS$stress
+    } else {
+        MDS <- list(
+            conf = stats::cmdscale(distance0, k = nprofile),
+            stress = NULL
+        )
+        MDS$conf <- sweep(MDS$conf, 2L, direction, `*`)
+        stressOri <- NULL
+    }
+    profileOri <- MDS$conf
+    rownames(profileOri) <- testname
+    colnames(profileOri) <- paste0("D", seq_len(nprofile))
+    MDS$conf <- profileOri
+
+    profileBoot <- lapply(
+        seq_len(nprofile),
+        function(...) matrix(NA_real_, nrow = nBoot, ncol = ntest)
+    )
+    stressBoot <- if (identical(mds, "smacof")) numeric(nBoot) else NULL
+
+    for (b in seq_len(nBoot)) {
+        boot_data <- testdata[sample.int(nsubject, nsubject, replace = TRUE), , drop = FALSE]
+        boot_distance <- .pams_distance(boot_data, distance)
+        if (identical(mds, "smacof")) {
+            boot_fit <- smacof::smacofSym(
+                boot_distance,
+                ndim = nprofile,
+                type = type
+            )
+            configuration <- boot_fit$conf
+            stressBoot[b] <- boot_fit$stress
+        } else {
+            configuration <- stats::cmdscale(boot_distance, k = nprofile)
+        }
+        configuration <- .align_pams_signs(configuration, profileOri)
+        for (j in seq_len(nprofile)) profileBoot[[j]][b, ] <- configuration[, j]
+    }
+
+    profileJack <- lapply(
+        seq_len(nprofile),
+        function(...) matrix(NA_real_, nrow = nsubject, ncol = ntest)
+    )
+    stressJack <- if (identical(mds, "smacof")) numeric(nsubject) else NULL
+
+    for (i in seq_len(nsubject)) {
+        jack_distance <- .pams_distance(testdata[-i, , drop = FALSE], distance)
+        if (identical(mds, "smacof")) {
+            jack_fit <- smacof::smacofSym(
+                jack_distance,
+                ndim = nprofile,
+                type = type
+            )
+            configuration <- jack_fit$conf
+            stressJack[i] <- jack_fit$stress
+        } else {
+            configuration <- stats::cmdscale(jack_distance, k = nprofile)
+        }
+        configuration <- .align_pams_signs(configuration, profileOri)
+        for (j in seq_len(nprofile)) profileJack[[j]][i, ] <- configuration[, j]
+    }
 
     profile <- vector("list", nprofile)
-    for (i in 1:nprofile)
-        profile[[i]] <- data.frame(
-            Ori      = profileOri[, i],
-            Mean     = apply(profileBoot[[i]], 2, mean),
-            SE       = apply(profileBoot[[i]], 2, sd),
-            Lower    = apply(profileBoot[[i]], 2, quantile, lalpha),
-            Upper    = apply(profileBoot[[i]], 2, quantile, ualpha),
-            BCaLower = BCACI[[i]][, 1],
-            BCaUpper = BCACI[[i]][, 2],
-            row.names = testname
-        )
-
-    # Fix 3: condition corrected from 'nprofile > 2' to 'nprofile > 1'
-    # so that the second profile is included when nprofile == 2.
-    tmp2 <- profile[[1]]
-    if (nprofile > 1)
-        for (i in 2:nprofile)
-            tmp2 <- cbind(tmp2, profile[[i]])
-
-    # ------------------------------------------------------------------
-    # Summary statistics for smacof stress (including BCa CI)
-    # ------------------------------------------------------------------
+    for (j in seq_len(nprofile)) {
+        values <- t(vapply(
+            seq_len(ntest),
+            function(k) .pams_summary_row(
+                original = profileOri[k, j],
+                bootstrap = profileBoot[[j]][, k],
+                jackknife = profileJack[[j]][, k],
+                lower = lalpha,
+                upper = ualpha
+            ),
+            numeric(7L)
+        ))
+        profile[[j]] <- as.data.frame(values)
+        rownames(profile[[j]]) <- testname
+    }
+    names(profile) <- paste0("Profile", seq_len(nprofile))
+    names(profileBoot) <- names(profile)
 
     stresssummary <- NULL
-    if (mds == "smacof") {
-        suu  <- -(stressu - mean(stressu))
-        sacc <- sum(suu*suu*suu) / (6 * (sum(suu*suu))^1.5)
-        z0   <- qnorm(sum(stressBoot < stressOri) / nBoot)
-        tt   <- pnorm(z0 + (z0 + zalpha) / (1 - sacc * (z0 + zalpha)))
-        BCACIstress <- quantile(stressBoot, probs = tt)
+    if (identical(mds, "smacof")) {
+        stresssummary <- as.data.frame(t(.pams_summary_row(
+            original = stressOri,
+            bootstrap = stressBoot,
+            jackknife = stressJack,
+            lower = lalpha,
+            upper = ualpha
+        )))
+        rownames(stresssummary) <- NULL
+    }
 
-        stresssummary <- data.frame(
-            Ori      = stressOri,
-            Mean     = mean(stressBoot),
-            SE       = sd(stressBoot),
-            Lower    = quantile(stressBoot, lalpha),
-            Upper    = quantile(stressBoot, ualpha),
-            BCaLower = BCACIstress[1],
-            BCaUpper = BCACIstress[2],
-            row.names = NULL
+    R2 <- .pams_profile_r2(profileOri)
+    names(R2) <- paste0("D", seq_len(nprofile))
+
+    result <- matrix(
+        NA_real_,
+        nrow = nsubject,
+        ncol = 2L * nprofile + 2L,
+        dimnames = list(
+            paste0("#", seq_len(nsubject)),
+            c(paste0("w", seq_len(nprofile)), "level", "R^2",
+              paste0("corDim", seq_len(nprofile)))
+        )
+    )
+    for (i in seq_len(nsubject)) {
+        observed <- as.numeric(testdata[i, ])
+        level <- mean(observed)
+        pattern <- observed - level
+        person_fit <- .pams_fit_no_intercept(pattern, profileOri)
+        partial_correlations <- .pams_partial_correlations(pattern, profileOri)
+        result[i, ] <- c(
+            person_fit$coefficients,
+            level,
+            person_fit$r_squared,
+            partial_correlations
         )
     }
-
-    # ------------------------------------------------------------------
-    # Write MDS results to CSV (if file path supplied)
-    # ------------------------------------------------------------------
-
-    if (!is.null(file)) {
-        cat("Summary Statistics for Stress",
-            file = paste0(file, "MDS.csv"), sep = "", "\n")
-        cat(c("Ori", "Mean", "SE", "Lower", "Upper", "BCaLower", "BCaUpper"),
-            file = paste0(file, "MDS.csv"), sep = ",", "\n", append = TRUE)
-
-        if (mds == "classical")
-            cat(stressOri,
-                file = paste0(file, "MDS.csv"), sep = ",", "\n\n", append = TRUE)
-        if (mds == "smacof")
-            cat(as.numeric(stresssummary),
-                file = paste0(file, "MDS.csv"), sep = ",", "\n\n", append = TRUE)
-
-        cat("Summary Statistics for Profile",
-            file = paste0(file, "MDS.csv"), sep = "", "\n", append = TRUE)
-        cat(c("Name",
-              paste0(rep(c("Ori", "Mean", "SE", "Lower", "Upper",
-                           "BCaLower", "BCaUpper"),
-                         nprofile),
-                     rep(1:nprofile, each = 7))),
-            file = paste0(file, "MDS.csv"), sep = ",", "\n", append = TRUE)
-        write.table(tmp2,
-                    file = paste0(file, "MDS.csv"),
-                    sep = ",", append = TRUE, col.names = FALSE)
+    meanR2 <- if (all(is.na(result[, nprofile + 2L]))) {
+        NA_real_
+    } else {
+        mean(result[, nprofile + 2L], na.rm = TRUE)
     }
-
-    # ------------------------------------------------------------------
-    # Person weights and partial correlations (regression step)
-    # ------------------------------------------------------------------
-
-    formulaall  <- as.formula(paste("y ~ -1 +",
-                                    paste(paste0("D", 1:nprofile), collapse = "+")))
-    formulaeach <- NULL
-    for (k in 1:nprofile)
-        formulaeach <- c(formulaeach,
-                         paste(paste0("D", k, " ~ -1+"),
-                               paste(paste0("D", setdiff(1:nprofile, k),
-                                            collapse = "+"))))
-
-    R2            <- rep(0, nprofile)
-    outDresiduals <- NULL
-    for (j in 1:nprofile) {
-        outD          <- lm(formulaeach[[j]], data.frame(profileOri))
-        outDresiduals <- cbind(outDresiduals, outD$residuals)
-        R2[j]         <- summary(outD)$r.squared
-    }
-
-    result <- NULL
-    pcorr  <- rep(0, nprofile)
-    for (i in 1:nsubject) {
-        y          <- as.numeric(testdata[i, ])
-        my         <- mean(y)
-        y          <- y - my
-        out        <- lm(formulaall, data.frame(y, profileOri))
-        coeffmulti <- out$coefficients
-        R2multi    <- summary(out)$r.squared
-
-        for (j in 1:nprofile) {
-            outy     <- update(out, as.formula(paste0(". ~ . -D", j)))
-            pcorr[j] <- cor(outy$residuals, outDresiduals[, j])
-        }
-        result <- rbind(result, c(coeffmulti, my, R2multi, pcorr))
-    }
-    meanR2 <- mean(result[, nprofile + 2])
-
-    colnames(result) <- c(paste0("w", 1:nprofile),
-                          "level", "R^2",
-                          paste0("corDim", 1:nprofile))
-    rownames(result) <- paste0("#", 1:nsubject)
-
-    if (!is.null(file)) {
-        cat(c("Overall R^2", meanR2),
-            file = paste0(file, "Weight.csv"), sep = ",", "\n")
-        cat(c("id", paste0("w", 1:nprofile), "level", "R^2",
-              paste0("corDim", 1:nprofile)),
-            file = paste0(file, "Weight.csv"), sep = ",", "\n", append = TRUE)
-        write.table(result,
-                    file = paste0(file, "Weight.csv"),
-                    sep = ",", append = TRUE, col.names = FALSE)
-    }
-
-    # ------------------------------------------------------------------
-    # Bootstrap CIs for person weights and partial correlations
-    # (for specified participants only)
-    # ------------------------------------------------------------------
-
-    formulaallB  <- as.formula(paste("y ~ -1 +",
-                                     paste(paste0("X", 1:nprofile), collapse = "+")))
-    formulaeachB <- NULL
-    for (k in 1:nprofile)
-        formulaeachB <- c(formulaeachB,
-                          paste(paste0("X", k, " ~ -1+"),
-                                paste(paste0("X", setdiff(1:nprofile, k),
-                                             collapse = "+"))))
 
     resultB <- resultBP <- NULL
-
     if (!is.null(participant)) {
-        sumstat <- rep(0, 5 * nprofile)
-        index1  <- seq(1, 5 * nprofile, by = 5)
-        index2  <- seq(2, 5 * nprofile, by = 5)
-        index3  <- seq(3, 5 * nprofile, by = 5)
-        index4  <- seq(4, 5 * nprofile, by = 5)
-        index5  <- seq(5, 5 * nprofile, by = 5)
+        xBoot <- lapply(seq_len(nBoot), function(b) {
+            do.call(cbind, lapply(profileBoot, function(x) x[b, ]))
+        })
+        weight_names <- unlist(lapply(
+            seq_len(nprofile),
+            function(j) c(paste0("w", j), paste0(c("m", "se", "L", "U"), j))
+        ))
+        pcorr_names <- unlist(lapply(
+            seq_len(nprofile),
+            function(j) c(paste0("corDim", j), paste0(c("m", "se", "L", "U"), j))
+        ))
+        resultB <- matrix(
+            NA_real_,
+            nrow = length(participant),
+            ncol = 5L * nprofile + 2L + nprofile,
+            dimnames = list(
+                paste0("#", participant),
+                c(weight_names, "level", "R^2", paste0("corDim", seq_len(nprofile)))
+            )
+        )
+        resultBP <- matrix(
+            NA_real_,
+            nrow = length(participant),
+            ncol = 5L * nprofile,
+            dimnames = list(paste0("#", participant), pcorr_names)
+        )
 
-        xBoot <- vector("list", nBoot)
-        for (k in 1:nBoot)
-            for (j in 1:nprofile)
-                xBoot[[k]] <- cbind(xBoot[[k]], profileBoot[[j]][k, ])
-
-        outDresiduals <- vector("list", nBoot)
-        for (k in 1:nBoot)
-            for (j in 1:nprofile) {
-                outD               <- lm(formulaeachB[[j]],
-                                         data.frame(y, xBoot[[k]]))
-                outDresiduals[[k]] <- cbind(outDresiduals[[k]], outD$residuals)
+        for (i in seq_along(participant)) {
+            observed <- as.numeric(testdata[participant[i], ])
+            level <- mean(observed)
+            pattern <- observed - level
+            boot_weights <- matrix(NA_real_, nrow = nBoot, ncol = nprofile)
+            boot_pcorr <- matrix(NA_real_, nrow = nBoot, ncol = nprofile)
+            for (b in seq_len(nBoot)) {
+                boot_weights[b, ] <- .pams_fit_no_intercept(pattern, xBoot[[b]])$coefficients
+                boot_pcorr[b, ] <- .pams_partial_correlations(pattern, xBoot[[b]])
             }
 
-        for (i in 1:length(participant)) {
-            y  <- as.numeric(testdata[participant[i], ])
-            my <- mean(y)
-            y  <- y - my
-
-            tmpweight <- tmppcorr <- NULL
-            pcorr     <- rep(0, nprofile)
-
-            for (k in 1:nBoot) {
-                tmplm     <- lm(formulaallB, data.frame(y, xBoot[[k]]))
-                tmpweight <- rbind(tmpweight, coefficients(tmplm))
-
-                for (j in 1:nprofile) {
-                    outy     <- update(tmplm, as.formula(paste0(". ~ . -X", j)))
-                    pcorr[j] <- cor(outy$residuals, outDresiduals[[k]][, j])
-                }
-                tmppcorr <- rbind(tmppcorr, pcorr)
-            }
-
-            sumstat[index1] <- result[participant[i], 1:nprofile]
-            sumstat[index2] <- apply(tmpweight, 2, mean)
-            sumstat[index3] <- apply(tmpweight, 2, sd)
-            sumstat[index4] <- apply(tmpweight, 2, quantile, lalpha)
-            sumstat[index5] <- apply(tmpweight, 2, quantile, ualpha)
-            resultB <- rbind(resultB,
-                             c(sumstat, result[participant[i], -(1:nprofile)]))
-
-            sumstat[index1] <- result[participant[i], -(1:(nprofile + 2))]
-            sumstat[index2] <- apply(tmppcorr, 2, mean)
-            sumstat[index3] <- apply(tmppcorr, 2, sd)
-            sumstat[index4] <- apply(tmppcorr, 2, quantile, lalpha)
-            sumstat[index5] <- apply(tmppcorr, 2, quantile, ualpha)
-            resultBP <- rbind(resultBP, sumstat)
-        }
-
-        colnames(resultB) <- c(paste0(rep(c("w", "m", "se", "L", "U"),
-                                          nprofile),
-                                      rep(1:nprofile, each = 5)),
-                               "level", "R^2",
-                               paste0("corDim", 1:nprofile))
-        rownames(resultB) <- paste0("#", participant)
-
-        if (!is.null(file)) {
-            cat(c("id",
-                  paste0(rep(c("w", "m", "se", "L", "U"), nprofile),
-                         rep(1:nprofile, each = 5)),
-                  "level", "R^2",
-                  paste0("corDim", 1:nprofile)),
-                file = paste0(file, "WeightB.csv"), sep = ",", "\n")
-            write.table(resultB,
-                        file = paste0(file, "WeightB.csv"),
-                        sep = ",", append = TRUE, col.names = FALSE)
-        }
-
-        colnames(resultBP) <- paste0(rep(c("corDim", "m", "se", "L", "U"),
-                                         nprofile),
-                                     rep(1:nprofile, each = 5))
-        rownames(resultBP) <- paste0("#", participant)
-
-        if (!is.null(file)) {
-            cat(c("id",
-                  paste0(rep(c("corDim", "m", "se", "L", "U"), nprofile),
-                         rep(1:nprofile, each = 5))),
-                file = paste0(file, "PcorrB.csv"), sep = ",", "\n")
-            write.table(resultBP,
-                        file = paste0(file, "PcorrB.csv"),
-                        sep = ",", append = TRUE, col.names = FALSE)
+            weight_summary <- unlist(lapply(seq_len(nprofile), function(j) {
+                c(
+                    result[participant[i], j],
+                    mean(boot_weights[, j]),
+                    stats::sd(boot_weights[, j]),
+                    as.numeric(stats::quantile(boot_weights[, j], lalpha, names = FALSE)),
+                    as.numeric(stats::quantile(boot_weights[, j], ualpha, names = FALSE))
+                )
+            }))
+            pcorr_summary <- unlist(lapply(seq_len(nprofile), function(j) {
+                c(
+                    result[participant[i], nprofile + 2L + j],
+                    mean(boot_pcorr[, j], na.rm = TRUE),
+                    stats::sd(boot_pcorr[, j], na.rm = TRUE),
+                    as.numeric(stats::quantile(
+                        boot_pcorr[, j], lalpha, na.rm = TRUE, names = FALSE
+                    )),
+                    as.numeric(stats::quantile(
+                        boot_pcorr[, j], ualpha, na.rm = TRUE, names = FALSE
+                    ))
+                )
+            }))
+            resultB[i, ] <- c(
+                weight_summary,
+                result[participant[i], nprofile + 1L],
+                result[participant[i], nprofile + 2L],
+                result[participant[i], (nprofile + 3L):(2L * nprofile + 2L)]
+            )
+            resultBP[i, ] <- pcorr_summary
         }
     }
 
-    # ------------------------------------------------------------------
-    # Return all results as a named list
-    # ------------------------------------------------------------------
+    if (!is.null(file)) {
+        profile_table <- do.call(cbind, profile)
+        profile_names <- unlist(lapply(
+            seq_len(nprofile),
+            function(j) paste0(names(profile[[j]]), j)
+        ))
+        colnames(profile_table) <- profile_names
+        mds_file <- paste0(file, "MDS.csv")
+        cat("Summary Statistics for Stress\n", file = mds_file)
+        if (is.null(stresssummary)) {
+            cat("Not available for classical MDS\n\n", file = mds_file, append = TRUE)
+        } else {
+            utils::write.table(
+                stresssummary,
+                file = mds_file,
+                sep = ",",
+                row.names = FALSE,
+                col.names = TRUE,
+                append = TRUE
+            )
+            cat("\n", file = mds_file, append = TRUE)
+        }
+        cat("Summary Statistics for Profile\n", file = mds_file, append = TRUE)
+        utils::write.table(
+            profile_table,
+            file = mds_file,
+            sep = ",",
+            row.names = TRUE,
+            col.names = NA,
+            append = TRUE
+        )
 
-    list(MDS           = MDS,
-         MDSsummary    = profile,
-         MDSprofile    = profileBoot,
-         stresssummary = stresssummary,
-         stressprofile = stressBoot,
-         MDSR2         = R2,
-         Weight        = result,
-         WeightmeanR2  = meanR2,
-         WeightB       = resultB,
-         PcorrB        = resultBP,
-         nprofile      = nprofile,
-         nBoot         = nBoot,
-         scale         = scale,
-         testname      = testname)
+        utils::write.table(
+            result,
+            file = paste0(file, "Weight.csv"),
+            sep = ",",
+            row.names = TRUE,
+            col.names = NA
+        )
+        if (!is.null(resultB)) {
+            utils::write.table(
+                resultB,
+                file = paste0(file, "WeightB.csv"),
+                sep = ",",
+                row.names = TRUE,
+                col.names = NA
+            )
+            utils::write.table(
+                resultBP,
+                file = paste0(file, "PcorrB.csv"),
+                sep = ",",
+                row.names = TRUE,
+                col.names = NA
+            )
+        }
+    }
+
+    output <- list(
+        MDS = MDS,
+        MDSsummary = profile,
+        MDSprofile = profileBoot,
+        stresssummary = stresssummary,
+        stressprofile = stressBoot,
+        MDSR2 = R2,
+        Weight = result,
+        WeightmeanR2 = meanR2,
+        WeightB = resultB,
+        PcorrB = resultBP,
+        nprofile = nprofile,
+        nBoot = nBoot,
+        scale = scale,
+        testname = testname,
+        call = call,
+        mds = mds,
+        type = if (identical(mds, "smacof")) type else NA_character_,
+        distance = distance,
+        nsubject = nsubject,
+        ntest = ntest,
+        cl = cl,
+        direction = direction
+    )
+    class(output) <- c("pams_fit", "list")
+    output
 }

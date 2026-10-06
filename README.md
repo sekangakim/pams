@@ -45,6 +45,9 @@ show how response patterns evolve over time.
 ## Installation
 
 ```r
+# Install the CRAN release:
+install.packages("pams")
+
 # Install the development version from GitHub:
 # install.packages("devtools")
 devtools::install_github("sekangakim/pams")
@@ -88,16 +91,19 @@ result <- BootSmacof(
 )
 
 # Step 3: inspect results
-result$MDS$stress          # stress of original fit
-result$WeightmeanR2        # mean R^2 across all persons
+summary(result)
+plot(result, profiles = 1:3)
 
 # Core profile coordinates with BCa CIs
 round(result$MDSsummary[[1]], 3)  # Core Profile 1
 round(result$MDSsummary[[2]], 3)  # Core Profile 2
 round(result$MDSsummary[[3]], 3)  # Core Profile 3
 
-# Weights and core-profile correlations for selected persons
+# Unstandardized OLS weights and partial correlations for selected persons
 round(result$Weight[1:10, ], 2)
+
+# Tidyverse-compatible tabular output (tibble is optional)
+weights_tbl <- tibble::as_tibble(result$Weight, rownames = "participant")
 ```
 
 ---
@@ -110,7 +116,7 @@ The core function of the package. It fits a nonmetric MDS solution to the
 J × J inter-variable distance matrix of the input data, bootstraps the
 solution to produce empirical sampling distributions of core profile
 coordinates, and computes BCa confidence intervals. It also estimates
-person-level weights, R-squared values, and correlations with core profiles
+person-level weights, R-squared values, and partial correlations with core profiles
 for all participants, with optional bootstrap CIs for a selected subset.
 
 | Argument | Description |
@@ -138,7 +144,7 @@ for all participants, with optional bootstrap CIs for a selected subset.
 | `stresssummary` | Bootstrap summary (mean, SE, BCa CI) of smacof stress |
 | `stressprofile` | Vector of 2,000 bootstrap stress values |
 | `MDSR2` | R² of Di regressed on other dimensions (collinearity check) |
-| `Weight` | Person weights, level, R², and core-profile correlations for all persons |
+| `Weight` | Unstandardized OLS weights, level, R², and partial correlations for all persons |
 | `WeightmeanR2` | Mean R² across all persons |
 | `WeightB` | Bootstrap CIs for weights of selected participants |
 | `PcorrB` | Bootstrap CIs for partial correlations of selected participants |
@@ -147,30 +153,27 @@ for all participants, with optional bootstrap CIs for a selected subset.
 
 ## Worked Examples
 
-Full worked examples for both cross-sectional and longitudinal data —
-including dimensionality selection, direction checking, BCa CI plots,
-individual person assessment, and residual assumption checks — are provided
-in the package vignette:
+The bundled vignette provides a reproducible analysis using public data. It
+covers preliminary dimensionality assessment, practical direction selection,
+bootstrap fitting, the `summary()` and `plot()` methods, person-level output,
+and conversion to a tibble:
 
 ```r
-vignette("PAMS_analysis", package = "pams")
+vignette("pams", package = "pams")
 ```
 
-### Cross-sectional example
-Data: Woodcock-Johnson IV Cognitive Ability Battery (n = 1,650, ages 18–35,
-18 cognitive subscales). Three core profiles are extracted and labelled by
-their CHC factor structure peaks and valleys:
+## Direction and coordinate inference
 
-1. **High Cognitive Processing Speed with Low Long-Term Retrieval**
-2. **High Working Memory with Low Cognitive Processing Speed**
-3. **High Fluid Reasoning with Low Auditory Processing**
+MDS axis signs are arbitrary. Inspect a preliminary `smacofSym()` solution and
+set each element of `direction` to `1` or `-1` so that prespecified anchor
+variables appear on the desired side of the corresponding axis. Reversing a
+sign does not change distances, stress, fit, or whether a confidence interval
+excludes zero.
 
-### Longitudinal example
-Data: Eating Disorder Inventory-2 (n = 1,261 female anorexic patients,
-11 subscales at Pre and Post treatment). Three core trajectory profiles
-describe differential treatment response patterns across symptom indicators,
-with BCa CIs used to identify which symptom improvements are statistically
-significant after treatment.
+`BootSmacof()` performs sign alignment of resampled dimensions to the
+original-sample solution. It does not perform general rotational or
+dimension-permutation alignment, so coordinate-wise inference requires care
+when dimensions are weak or nearly interchangeable.
 
 ---
 

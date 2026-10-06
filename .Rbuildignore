@@ -1,1 +1,5 @@
-^LICENSE\.md$
+^\.github$
+^cran-comments\.md$
+^\.git$
+^\.gitignore$
+^pams\.Rproj$

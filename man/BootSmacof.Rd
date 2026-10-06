@@ -8,7 +8,7 @@ BootSmacof(
   testdata,
   participant = NULL,
   mds = c("smacof", "classical"),
-  type = c("ratio", "interval", "ordinal", "mspline"),
+  type = c("ordinal", "interval", "ratio", "mspline"),
   distance = c("euclid", "sqeuclid"),
   scale = FALSE,
   nprofile = 3,
@@ -63,15 +63,18 @@ subscales (columns) in \code{testdata}.}
 element either \code{1} or \code{-1}. Multiplying a dimension by
 \code{-1} flips its sign to aid substantive interpretation (e.g., so
 that the first core profile aligns with the subscale mean profile).
-Default is \code{rep(1, nprofile)} (no flipping).}
+Inspect the preliminary \code{smacofSym()} coordinate plots and choose
+signs so that prespecified anchor variables appear on the desired side of
+each axis. Reversing a sign does not alter distances, stress, fit, or
+whether an interval excludes zero. Default is \code{rep(1, nprofile)}.}
 
 \item{cl}{Numeric confidence level for BCa intervals. Default is
 \code{0.95}. Common alternatives are \code{0.99} and \code{0.90}.}
 
 \item{nBoot}{A positive integer specifying the number of bootstrap
 samples. A minimum of \code{1000} is recommended for stable confidence
-interval estimation (Efron & Tibshirani, 1993); \code{2000} is the
-default.}
+interval estimation (Efron & Tibshirani, 1993); values below 1000 issue a
+warning and values below 10 are rejected. \code{2000} is the default.}
 
 \item{testname}{An optional character vector of length equal to the number
 of columns in \code{testdata}, giving subscale names used as row labels
@@ -79,12 +82,12 @@ in summary output and plots. If \code{NULL}, labels \code{"T1"},
 \code{"T2"}, \ldots are generated automatically.}
 
 \item{file}{An optional character string giving a file path stem. If
-supplied, three CSV files are written: \code{<file>MDS.csv} (stress
+supplied, two CSV files are always written: \code{<file>MDS.csv} (stress
 summary and core profile coordinates with BCa CIs),
 \code{<file>Weight.csv} (person weights, levels, R-squared values, and
-core-profile correlations), and \code{<file>WeightB.csv} (bootstrap
-summaries for selected participants). If \code{NULL} (the default), no
-files are written.}
+core-profile partial correlations). When \code{participant} is not \code{NULL},
+\code{<file>WeightB.csv} and \code{<file>PcorrB.csv} are also written.
+If \code{NULL} (the default), no files are written.}
 }
 \value{
 A named list with the following components:
@@ -101,7 +104,9 @@ A named list with the following components:
       \code{Mean} (bootstrap mean), \code{SE} (bootstrap standard error),
       \code{Lower} and \code{Upper} (percentile CI bounds),
       \code{BCaLower} and \code{BCaUpper} (BCa CI bounds). Coordinates
-      whose BCa CI does not include zero are statistically significant.}
+      whose pointwise BCa CI does not include zero are statistically
+      significant at the stated coordinate-wise level; these intervals are
+      not adjusted for multiplicity.}
     \item{\code{MDSprofile}}{A list of \code{nprofile} matrices, each of
       dimension \code{nBoot} \eqn{\times} \eqn{J}, containing the full
       bootstrap distribution of core profile coordinates.}
@@ -119,9 +124,14 @@ A named list with the following components:
       core profiles are not collinear.}
     \item{\code{Weight}}{A matrix of dimension \eqn{I \times (2K + 2)}
       containing, for every person: raw weights (\code{w1}, \ldots,
-      \code{wK}), level estimate, R-squared value, and correlations with
-      each core profile (\code{corDim1}, \ldots, \code{corDimK}).
-      Row names are \code{"#1"}, \code{"#2"}, \ldots}
+      \code{wK}), level estimate, R-squared value, and partial correlations
+      with each core profile (\code{corDim1}, \ldots, \code{corDimK}).
+      The raw weights are unstandardized no-intercept OLS coefficients from
+      regressing the person's ipsatized pattern on the retained coordinate
+      vectors. Each \code{corDim} value is the correlation between the
+      residualized person pattern and residualized focal core profile after
+      controlling for the other profiles. Row names are \code{"#1"},
+      \code{"#2"}, \ldots}
     \item{\code{WeightmeanR2}}{The mean R-squared value across all
       \eqn{I} persons, summarising how well the \code{nprofile} core
       profiles account for pattern variance in the sample.}
@@ -137,6 +147,8 @@ A named list with the following components:
     \item{\code{scale}}{Logical; whether columns were standardised.}
     \item{\code{testname}}{Character vector of subscale names used.}
   }
+  The returned list has class \code{"pams_fit"}, while retaining direct
+  access to every component listed above.
 }
 \description{
 Identifies population-level core response profiles from cross-sectional or
@@ -147,57 +159,45 @@ component (person mean) and a pattern component (ipsatized subscores).
 inter-variable distance matrix, bootstraps the solution to generate
 empirical sampling distributions of core profile coordinates, and computes
 bias-corrected and accelerated (BCa) confidence intervals for each
-coordinate. Person-level weights, R-squared values, and correlations with
+coordinate. Person-level weights, R-squared values, and partial correlations with
 core profiles are estimated for all participants, with optional bootstrap
 confidence intervals for a selected subset.
 }
+\section{Sign indeterminacy and alignment}{
+
+MDS coordinate signs are arbitrary. For each bootstrap and jackknife
+sample, \code{BootSmacof()} aligns each dimension to its original-sample
+counterpart by its correlation sign and then reports the orientation
+selected through \code{direction}. This is sign alignment only: the method
+does not perform general rotational alignment or dimension-permutation
+matching. Coordinate-wise inference should therefore be interpreted
+cautiously when dimensions are weak or nearly interchangeable. A sign
+reversal changes only the reported orientation; it does not change
+interpoint distances, stress, model fit, or interval exclusion of zero.
+}
+
 \examples{
-\dontrun{
-# Cross-sectional example using bundled WJ-IV cognitive ability data.
-library(pams)
-library(smacof)
+# Small toy example (runs automatically)
+set.seed(42)
+toy_data <- as.data.frame(matrix(rnorm(8 * 4, mean = 10, sd = 2),
+                                 nrow = 8, ncol = 4))
+colnames(toy_data) <- paste0("S", 1:4)
 
-cross_data <- read.csv(
-  system.file("extdata", "Cross-sectional.csv", package = "pams"),
-  header = FALSE
-)
-colnames(cross_data) <- c(
-  "OV1","NS2","VA3","LP4","PP5","SR6","VS7","GI8",
-  "CF9","NR10","NP11","NW12","VA13","PR14","AS15",
-  "ON16","PC17","MW18"
-)
-
-# Inspect stress across dimensionalities to choose nprofile
-smacofSym(dist(t(cross_data)), ndim = 2, type = "ordinal")$stress
-smacofSym(dist(t(cross_data)), ndim = 3, type = "ordinal")$stress
-smacofSym(dist(t(cross_data)), ndim = 4, type = "ordinal")$stress
-
-# Run PAMS with 3 core profiles and 2,000 bootstrap samples
-set.seed(1)
-result <- BootSmacof(
-  testdata    = cross_data,
-  participant = 1:10,
+result <- suppressWarnings(BootSmacof(
+  testdata    = toy_data,
+  participant = NULL,
   mds         = "smacof",
   type        = "ordinal",
   distance    = "euclid",
-  nprofile    = 3,
-  direction   = c(-1, 1, 1),
+  nprofile    = 2,
+  direction   = c(1, 1),
   cl          = 0.95,
-  nBoot       = 2000,
-  testname    = colnames(cross_data)
-)
-
-result$MDS$stress       # should be <= 0.05
-result$WeightmeanR2     # mean R^2 across all persons
-
-# Core profile coordinates with BCa CIs
+  nBoot       = 10,
+  testname    = colnames(toy_data)
+))
+result$MDS$stress
+round(result$WeightmeanR2, 2)
 round(result$MDSsummary[[1]], 3)
-round(result$MDSsummary[[2]], 3)
-round(result$MDSsummary[[3]], 3)
-
-# Weights and correlations for first 10 persons
-round(result$Weight[1:10, ], 2)
-}
 
 }
 \references{
